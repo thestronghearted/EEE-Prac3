@@ -39,6 +39,11 @@ def welcome():
 def menu():
     global end_of_game
     global value
+    global score
+    global PWM_b
+    global PWM_l
+    PWM_b.stop()
+    PWM_l.stop()
     end_of_game = False
     option = input("Select an option:   H - View High Scores     P - Play Game       Q - Quit\n")
     option = option.upper()
@@ -49,6 +54,7 @@ def menu():
         display_scores(s_count, ss)
     elif option == "P":
         os.system('clear')
+        score = 0
         print("Starting a new round!")
         print("Use the buttons on the Pi to make and submit your guess!")
         print("Press and hold the guess button to cancel your game")
@@ -64,9 +70,19 @@ def menu():
 
 def display_scores(count, raw_data):
     # print the scores to the screen in the expected format
-    print("There are {} scores. Here are the top 3!".format(count))
+    num_in_range = 3
+    if (count < 3):
+        num_in_range = count
+    if (count == 0):
+        print("There are no scores available")
+        return
+    if (count == 1):
+        print("There is 1 score available.")
+    else: 
+        print("There are {} scores. Here are the top {}!".format(count,num_in_range))
     # print out the scores in the required format
-    pass
+    for i in range(num_in_range):
+        print("{} - {} took {} guesses".format(i+1,raw_data[i][0],raw_data[i][1]))
 
 
 # Setup Pins
@@ -92,7 +108,7 @@ def setup():
     PWM_l = GPIO.PWM(LED_accuracy, 100000)
 
     # Setup debouncing and callbacks
-    GPIO.add_event_detect(btn_submit,GPIO.FALLING,callback=btn_guess_pressed,bouncetime=1000)
+    GPIO.add_event_detect(btn_submit,GPIO.FALLING,callback=btn_guess_pressed,bouncetime=500)
     GPIO.add_event_detect(btn_increase,GPIO.FALLING,callback=btn_increase_pressed,bouncetime=200)
 
     pass
@@ -101,16 +117,19 @@ def setup():
 # Load high scores
 def fetch_scores():
     # get however many scores there are
-    score_count = eeprom.read_block(0,1)
-    x = ""
-    for i in score_count:
-        if i != 255:
-            x += str(i)
-    score_count = int(x)
-    print(score_count)
+    score_count = eeprom.read_byte(0)
     # Get the scores
     scores = []
-
+    for i in range(score_count):
+        x = eeprom.read_block((i+1)*10,16)
+        name = ""
+        for k in range(15):
+            if (x[k]!=0):
+                name += chr(x[k])
+            else:
+                break
+        score = x[15]
+        scores.append([name,score])
     # convert the codes back to ascii
     
     # return back the results
@@ -133,15 +152,18 @@ def save_scores():
         data_to_write = []
         for letter in high_scores[0]:
             data_to_write.append(ord(letter))
+        while (len(data_to_write)<15):
+            data_to_write.append(0)
+        while (len(data_to_write)>15):
+            data_to_write.pop()
         data_to_write.append(high_scores[1])
-        eeprom.write_block(i+1,data_to_write)
+        eeprom.write_block((i+1)*10,data_to_write,4)
 
     # fetch scores
     # include new score
     # sort
     # update total amount of scores
     # write new scores
-    pass
 
 
 # Generate guess number
@@ -191,6 +213,7 @@ def btn_guess_pressed(channel):
         score = 0
         end_of_game = True
         welcome()
+        print("Select an option:   H - View High Scores     P - Play Game       Q - Quit")
     else:
         if (numberOfGuess == value):
             clearLeds()
@@ -198,7 +221,6 @@ def btn_guess_pressed(channel):
             PWM_l.stop()
             PWM_b.start(0)
             PWM_b.stop()
-            print("Congradulations")
             save_scores()
             end_of_game = True
         else:
@@ -224,8 +246,9 @@ def btn_guess_pressed(channel):
 def accuracy_leds():
     global PWM_l
     PWM_l.start(50)
-
-    if (value < numberOfGuess):
+    if (numberOfGuess == 0):
+        PWM_l.ChangeDutyCycle(int(round(((8-value)/8)*100)))
+    elif (value <= numberOfGuess):
         PWM_l.ChangeDutyCycle(int(round(((8-numberOfGuess)/(8-value))*100)))
     else:
         PWM_l.ChangeDutyCycle(int(round((numberOfGuess/value)*100)))
@@ -243,7 +266,7 @@ def trigger_buzzer(): #####also caters for the circular nature of the guess, if 
     elif ((abs(value - numberOfGuess)==3) or abs(value - numberOfGuess)==5):
         PWM_b.ChangeFrequency(1) 
     else: ####for a 4 difference
-        PWM_b.ChangeFrequency(0.5)
+        PWM_b.stop()
 
 
 if __name__ == "__main__":
@@ -257,4 +280,4 @@ if __name__ == "__main__":
         print(e)
     finally:
         GPIO.cleanup()
-        eeprom.clear(2048)
+       # eeprom.clear(2048)
